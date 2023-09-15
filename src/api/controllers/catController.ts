@@ -15,10 +15,11 @@ import CatModel from '../models/catModel';
 import UserModel from '../models/userModel';
 import DBMessageResponse from '../../interfaces/DBMessageResponse';
 import {validationResult} from 'express-validator';
-import {Types} from 'mongoose';
+import mongoose, {Types} from 'mongoose';
 import {User} from '../../interfaces/User';
 import jwt from 'jsonwebtoken';
-import catModel from '../models/catModel';
+import {Cat} from '../../interfaces/Cat';
+import {ObjectId} from 'mongodb';
 const catGetByUser = async (
   req: Request,
   res: Response,
@@ -44,14 +45,21 @@ const catGetByUser = async (
       token,
       process.env.JWT_SECRET as string
     ) as User;
-    const user = await UserModel.findById(decodedToken.id).select(
+    const user = await UserModel.findById(decodedToken._id).select(
       '-__v -password'
     );
     if (!user) {
       next(new CustomError('User not found', 404));
       return;
     }
-    const cats = await CatModel.find(user.id).select('-__v');
+    const cats2 = await CatModel.find();
+    console.log('cats2', cats2[0].owner);
+    const ownerId = new ObjectId(decodedToken._id);
+    console.log('ownerId', ownerId);
+    const cats = await CatModel.find({
+      owner: new mongoose.Types.ObjectId(decodedToken._id),
+    });
+    console.log('catuser', decodedToken);
     if (!cats || cats.length === 0) {
       next(new CustomError('No cats found', 404));
       return;
@@ -63,7 +71,7 @@ const catGetByUser = async (
 };
 
 const catGetByBoundingBox = async (
-  req: Request,
+  req: Request<{}, {}, {}, {topRight: string; bottomLeft: string}>,
   res: Response,
   next: NextFunction
 ) => {
@@ -78,25 +86,18 @@ const catGetByBoundingBox = async (
       next(new CustomError(messages, 400));
       return;
     }
-    const {minLat, minLng, maxLat, maxLng} = req.body;
+    const topRight = req.query.topRight.split(',');
+    const bottomLeft = req.query.bottomLeft.split(',');
     const cats = await CatModel.find({
       location: {
         $geoWithin: {
-          $geometry: {
-            type: 'Polygon',
-            coordinates: [
-              [
-                [minLng, minLat],
-                [maxLng, minLat],
-                [maxLng, maxLat],
-                [minLng, maxLat],
-                [minLng, minLat],
-              ],
-            ],
-          },
+          $box: [
+            [Number(bottomLeft[0]), Number(bottomLeft[1])],
+            [Number(topRight[0]), Number(topRight[1])],
+          ],
         },
       },
-    }).select('-__v');
+    });
     if (!cats || cats.length === 0) {
       next(new CustomError('No cats found', 404));
       return;
@@ -110,14 +111,25 @@ const catGetByBoundingBox = async (
 const catPutAdmin = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const errors = validationResult(req);
-    const {id} = req.params;
-    const {owner} = req.body;
-    if (!Types.ObjectId.isValid(id)) {
-      next(new CustomError('Invalid id', 400));
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      next(new CustomError('No token provided', 401));
       return;
     }
-    if (!Types.ObjectId.isValid(owner)) {
-      next(new CustomError('Invalid owner id', 400));
+    const decodedToken = jwt.verify(
+      token,
+      process.env.JWT_SECRET as string
+    ) as User;
+
+    const user = await UserModel.findById(decodedToken._id).select(
+      '-__v -password'
+    );
+    if (!user) {
+      next(new CustomError('User not found', 404));
+      return;
+    }
+    if (user.role !== 'admin') {
+      next(new CustomError('User not Admin', 404));
       return;
     }
     if (!errors.isEmpty()) {
@@ -129,19 +141,18 @@ const catPutAdmin = async (req: Request, res: Response, next: NextFunction) => {
       return;
     }
 
-    const cat = await CatModel.findById(id);
+    const cat = await CatModel.findByIdAndUpdate(req.params.id, req.body, {
+      new: true,
+    }).select('-__v');
     if (!cat) {
       next(new CustomError('Cat not found', 404));
       return;
     }
-    const user = await UserModel.findById(owner);
-    if (!user) {
-      next(new CustomError('User not found', 404));
-      return;
-    }
-    cat.owner = owner;
-    await cat.save();
-    res.json(cat);
+    const output: DBMessageResponse = {
+      message: 'Cat updated',
+      data: cat,
+    };
+    res.json(output);
   } catch (err) {
     next(new CustomError('Something went wrong with the server', 500));
   }
@@ -154,9 +165,25 @@ const catDeleteAdmin = async (
 ) => {
   try {
     const errors = validationResult(req);
-    const {id} = req.params;
-    if (!Types.ObjectId.isValid(id)) {
-      next(new CustomError('Invalid id', 400));
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      next(new CustomError('No token provided', 401));
+      return;
+    }
+    const decodedToken = jwt.verify(
+      token,
+      process.env.JWT_SECRET as string
+    ) as User;
+
+    const user = await UserModel.findById(decodedToken._id).select(
+      '-__v -password'
+    );
+    if (!user) {
+      next(new CustomError('User not found', 404));
+      return;
+    }
+    if (user.role !== 'admin') {
+      next(new CustomError('User not Admin', 404));
       return;
     }
     if (!errors.isEmpty()) {
@@ -167,21 +194,17 @@ const catDeleteAdmin = async (
       next(new CustomError(messages, 400));
       return;
     }
-    const user = await UserModel.findById(id);
-    if (!user) {
-      next(new CustomError('User not found', 404));
-      return;
-    }
-    if (user.role !== 'admin') {
-      next(new CustomError('Only admin can delete any users cat', 401));
-      return;
-    }
-    const cat = await CatModel.findByIdAndDelete(id);
+
+    const cat = await CatModel.findByIdAndDelete(req.params.id);
     if (!cat) {
       next(new CustomError('Cat not found', 404));
       return;
     }
-    res.json(cat);
+    const output: DBMessageResponse = {
+      message: 'Cat deleted',
+      data: cat,
+    };
+    res.json(output);
   } catch (err) {
     next(new CustomError('Something went wrong with the server', 500));
   }
@@ -204,8 +227,14 @@ const catDelete = async (req: Request, res: Response, next: NextFunction) => {
       next(new CustomError('Invalid id', 400));
       return;
     }
-    if (!Types.ObjectId.isValid(decodedToken.id)) {
-      next(new CustomError('Invalid owner id', 400));
+    const catToGet = await CatModel.findById(id);
+    if (!catToGet) {
+      next(new CustomError('Cat not found', 404));
+      return;
+    }
+
+    if (decodedToken._id !== catToGet.owner.toString()) {
+      next(new CustomError('Not owner of cat', 400));
       return;
     }
     if (!errors.isEmpty()) {
@@ -222,7 +251,7 @@ const catDelete = async (req: Request, res: Response, next: NextFunction) => {
       next(new CustomError('Cat not found', 404));
       return;
     }
-    if (decodedToken.id !== cat.owner.toString()) {
+    if (decodedToken._id !== cat.owner.toString()) {
       next(new CustomError('Only owner can delete cat', 401));
       return;
     }
@@ -254,8 +283,14 @@ const catPut = async (req: Request, res: Response, next: NextFunction) => {
       next(new CustomError('Invalid id', 400));
       return;
     }
-    if (!Types.ObjectId.isValid(decodedToken.id)) {
-      next(new CustomError('Invalid owner id', 400));
+    const catToGet = await CatModel.findById(id);
+    if (!catToGet) {
+      next(new CustomError('Cat not found', 404));
+      return;
+    }
+
+    if (decodedToken._id !== catToGet.owner.toString()) {
+      next(new CustomError('Not owner of cat', 400));
       return;
     }
     if (!errors.isEmpty()) {
@@ -267,11 +302,9 @@ const catPut = async (req: Request, res: Response, next: NextFunction) => {
       return;
     }
 
-    const cat = await catModel
-      .findByIdAndUpdate(req.params.id, req.body, {
-        new: true,
-      })
-      .select('-__v');
+    const cat = await CatModel.findByIdAndUpdate(req.params.id, req.body, {
+      new: true,
+    }).select('-__v');
     if (!cat) {
       next(new CustomError('Cat not found', 404));
       return;
@@ -327,7 +360,11 @@ const catListGet = async (req: Request, res: Response, next: NextFunction) => {
   }
 };
 
-const catPost = async (req: Request, res: Response, next: NextFunction) => {
+const catPost = async (
+  req: Request<{}, {}, Cat>,
+  res: Response,
+  next: NextFunction
+) => {
   try {
     const errors = validationResult(req);
 
@@ -340,12 +377,30 @@ const catPost = async (req: Request, res: Response, next: NextFunction) => {
       next(new CustomError(messages, 400));
       return;
     }
-    const cat = await catModel.create(req.body);
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      next(new CustomError('No token provided', 401));
+      return;
+    }
+    const decodedUser = jwt.verify(
+      token,
+      process.env.JWT_SECRET as string
+    ) as User;
+    console.log('catti', req.file?.path);
+    console.log('dd');
+    const cat = await CatModel.create({
+      ...req.body,
+      owner: decodedUser._id,
+      filename: req.file?.path,
+      location: res.locals.coords,
+    });
+
+    console.log(cat);
     const output: DBMessageResponse = {
       message: 'Cat created',
       data: cat,
     };
-    res.status(201).json(output);
+    res.status(200).json(output);
   } catch (err) {
     next(new CustomError('Something went wrong with the server', 500));
   }

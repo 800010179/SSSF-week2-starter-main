@@ -8,6 +8,7 @@ import {
   userPutCurrent,
 } from '../controllers/userController';
 import passport from '../../passport';
+import {body, param} from 'express-validator';
 
 const router = express.Router();
 
@@ -16,7 +17,12 @@ const router = express.Router();
 router
   .route('/')
   .get(userListGet)
-  .post(userPost)
+  .post(
+    body('user_name').isLength({min: 2}).isString().escape(),
+    body('email').isEmail().normalizeEmail().escape(),
+    body('password').isLength({min: 4}).isString().escape(),
+    userPost
+  )
   .put(passport.authenticate('jwt', {session: false}), userPutCurrent)
   .delete(passport.authenticate('jwt', {session: false}), userDeleteCurrent);
 
@@ -26,6 +32,6 @@ router.get(
   checkToken
 );
 
-router.route('/:id').get(userGet);
+router.route('/:id').get(param('id').isMongoId(), userGet);
 
 export default router;

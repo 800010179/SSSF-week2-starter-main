@@ -11,16 +11,16 @@ const catSchema = new Schema<Cat>({
     type: {
       type: String,
       enum: ['Point'],
-      required: true,
+
       default: 'Point',
     },
     coordinates: {
       type: [Number],
-      required: true,
+
       default: [0, 0],
     },
   },
-  owner: {type: Schema.Types.ObjectId, ref: 'User', required: true},
+  owner: {type: Schema.Types.ObjectId, ref: 'User'},
 });
 
 export default model<Cat>('Cat', catSchema);

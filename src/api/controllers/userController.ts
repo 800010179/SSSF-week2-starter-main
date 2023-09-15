@@ -27,6 +27,7 @@ const userGet = async (req: Request, res: Response, next: NextFunction) => {
       next(new CustomError(messages, 400));
       return;
     }
+
     const user = await UserModel.findById(req.params.id).select('-password');
     if (!user) {
       next(new CustomError('User not found', 404));
@@ -71,6 +72,7 @@ const userPost = async (
 
     user.password = await bcrypt.hash(user.password, 12);
     user.role = 'user';
+    console.log('loluserx', user);
     const newUser = await UserModel.create(user);
     const response: DBMessageResponse = {
       message: 'User created',
@@ -83,6 +85,7 @@ const userPost = async (
 
     res.json(response);
   } catch (error) {
+    console.log('loly', error);
     next(new CustomError('User creation failed', 500));
   }
 };
@@ -112,20 +115,28 @@ const userPutCurrent = async (
       token,
       process.env.JWT_SECRET as string
     ) as User;
-    const user = await UserModel.findById(decodedToken.id).select('-password');
+    const user = await UserModel.findById(decodedToken._id);
     if (!user) {
       next(new CustomError('User not found', 404));
       return;
     }
-    await UserModel.findByIdAndUpdate(decodedToken.id, req.body, {
-      new: true,
-    }).select('-__v');
+    const updatedUser = await UserModel.findByIdAndUpdate(
+      decodedToken._id,
+      req.body,
+      {
+        new: true,
+      }
+    );
+    if (!updatedUser) {
+      next(new CustomError('User not found or update failed', 404));
+      return;
+    }
     const response: DBMessageResponse = {
       message: 'User updated',
       data: {
-        user_name: user.user_name,
-        email: user.email,
-        _id: user._id,
+        user_name: updatedUser.user_name,
+        email: updatedUser.email,
+        _id: updatedUser._id,
       },
     };
     res.json(response);
@@ -149,12 +160,12 @@ const userDeleteCurrent = async (
       token,
       process.env.JWT_SECRET as string
     ) as User;
-    const user = await UserModel.findById(decodedToken.id).select('-password');
+    const user = await UserModel.findById(decodedToken._id).select('-password');
     if (!user) {
       next(new CustomError('User not found', 404));
       return;
     }
-    await UserModel.findByIdAndDelete(decodedToken.id);
+    await UserModel.findByIdAndDelete(decodedToken._id);
     const response: DBMessageResponse = {
       message: 'User deleted',
       data: {
@@ -193,9 +204,9 @@ const checkToken = async (
     const response: DBMessageResponse = {
       message: 'Token is valid',
       data: {
-        user_name: req.body.user_name,
-        email: req.body.email,
-        _id: req.body._id,
+        user_name: decodedToken.user_name,
+        email: decodedToken.email,
+        _id: decodedToken._id,
       },
     };
     res.json(response);

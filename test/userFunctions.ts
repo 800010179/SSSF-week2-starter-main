@@ -53,6 +53,7 @@ const postUser = (
   url: string | Function,
   user: UserTest
 ): Promise<UserWithToken> => {
+  console.log('lolxd', user);
   return new Promise((resolve, reject) => {
     request(url)
       .post('/api/v1/users/')

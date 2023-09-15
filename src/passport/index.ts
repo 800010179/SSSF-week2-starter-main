@@ -9,6 +9,7 @@ passport.use(
   new Strategy(async (username, password, done) => {
     try {
       const user = await userModel.findOne({email: username});
+      console.log('usernamelol2', user, username);
       if (user === null || !user) {
         return done(null, false);
       }

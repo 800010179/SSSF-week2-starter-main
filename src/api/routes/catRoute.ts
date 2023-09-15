@@ -55,11 +55,18 @@ router
 
 router
   .route('/:id')
-  .get(param('id'), catGet)
-  .put(passport.authenticate('jwt', {session: false}), param('id'), catPut)
-  .delete(
+  .get(param('id').isMongoId(), catGet)
+  .put(
+    body('cat_name').isLength({min: 2}).isString().escape().optional(),
+    body('weight').isNumeric().escape().optional(),
+    body('birthdate').isDate().optional(),
     passport.authenticate('jwt', {session: false}),
     param('id'),
+    catPut
+  )
+  .delete(
+    passport.authenticate('jwt', {session: false}),
+    param('id').isMongoId(),
     catDelete
   );
 
